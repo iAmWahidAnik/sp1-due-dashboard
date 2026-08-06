@@ -1,0 +1,51 @@
+import type { CustomerDue } from './types';
+
+const now = '2026-07-13T00:00:00.000Z';
+
+export const seedData: CustomerDue[] = [
+  ['Mukul (Vai Vai Automobiles)', 6430, '2026-02-23'],
+  ['Juyel Rana', 5350, '2026-03-13'],
+  ['Bappy', 4050, '2026-03-15'],
+  ['Masud Motors (amtola)', 4140, '2026-07-15'],
+  ['Sagor - 14 No', 6700, '2026-07-18'],
+  ['Alomgir', 650, '2026-03-27'],
+  ['Sumon / Mohon (SM Motors)', 23690, '2026-04-30'],
+  ['Mohin (kabir - Alamgir)', 9950, '2026-07-15'],
+  ['Hafiz', 3250, '2026-05-04'],
+  ['Raisa ENT', 2800, '2026-05-07'],
+  ['Sojol', 14160, '2026-05-08'],
+  ['Ibrahim (Bike Bari)', 1640, '2026-05-13'],
+  ['Faruk (Mamun Vai)', 2600, '2026-05-15'],
+  ['Akbor (Sohel - Sahin)', 900, '2026-05-19'],
+  ['Mamun (kabir)', 1900, '2026-06-04'],
+  ['Kabir (Hasan)', 3600, '2026-07-14'],
+  ['Sahin (Kabir)', 3600, '2026-06-10'],
+  ['Sohel', 5250, '2026-06-14'],
+  ['Sahin (Anik)', 4900, '2026-06-20'],
+  ['Sojib (Kabir)', 1700, '2026-07-08'],
+  ['Borhan Boss', 10600, '2026-06-28'],
+  ['Mokles', 13070, '2026-07-10'],
+  ['Esmail', 4240, '2026-06-20'],
+  ['Samsul Rana', 1880, '2025-08-02'],
+  ['Mohin Uddin (Probox)', 1500, '2026-07-17'],
+  ['Sumon Itkhola', 450, '2026-07-17'],
+].map(([name, dueAmount, lastTransactionDate], index) => ({
+  id: `seed-${index + 1}`,
+  name: String(name),
+  dueAmount: Number(dueAmount),
+  lastTransactionDate: String(lastTransactionDate),
+  status: 'due',
+  transactions: [
+    {
+      id: `seed-tx-${index + 1}`,
+      type: 'due' as const,
+      title: 'Opening Due',
+      amount: Number(dueAmount),
+      date: String(lastTransactionDate),
+      note: 'Imported from the initial due list',
+      createdAt: now,
+    },
+  ],
+  createdAt: now,
+  updatedAt: now,
+}));
