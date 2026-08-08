@@ -1,38 +1,28 @@
-# SP1 Due Dashboard চালানোর নিয়ম
+# চালানোর সংক্ষিপ্ত নির্দেশনা
 
-## React/Vite project
+এই version cloud-based। Deploy করার আগে `SUPABASE_SETUP_BN.md` অনুসরণ করুন।
 
-1. কম্পিউটারে Node.js LTS ইনস্টল করুন।
-2. project folder-এ Terminal খুলুন।
-3. রান করুন:
+## Local run
+
+1. `.env.example` copy করে `.env.local` বানান।
+2. Supabase Project URL এবং public/anon key বসান।
+3. চালান:
 
 ```bash
 npm install
 npm run dev
 ```
 
-4. Terminal-এ দেখানো URL browser-এ খুলুন। সাধারণত `http://localhost:5173`।
+## Vercel deploy
 
-## দ্রুত demo দেখতে
+GitHub repository connect করুন এবং Vercel Environment Variables-এ দিন:
 
-`standalone/index.html` browser-এ খুলুন। Windows-এ `start-demo.bat` চালিয়েও demo খোলা যাবে।
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+```
 
-## নতুন ledger ব্যবহার
+Build Command: `npm run build`  
+Output Directory: `dist`
 
-- **Add new due:** পণ্যের নাম/শিরোনাম, টাকার পরিমাণ এবং তারিখ যোগ করুন। এটি বর্তমান বকেয়ার সঙ্গে যোগ হবে।
-- **Add payment:** payment-এর শিরোনাম, amount এবং তারিখ যোগ করুন। এটি বর্তমান বকেয়া থেকে বিয়োগ হবে।
-- **View statement:** customer-এর সম্পূর্ণ due/payment history এবং running balance দেখাবে।
-- **Print / Save PDF:** statement customer-কে পাঠানোর জন্য PDF বানাতে পারবেন।
-- **Copy details:** statement text কপি করে WhatsApp/Messenger-এ পাঠানো যাবে।
-- ভুল transaction statement থেকে delete করলে balance আবার স্বয়ংক্রিয়ভাবে হিসাব হবে।
-
-## Excel export
-
-React version-এর Excel export-এ দুটি sheet থাকবে:
-
-1. `Customers` — বর্তমান customer balance ও status
-2. `Transactions` — সকল due এবং payment ledger entry
-
-## ডেটা সংরক্ষণ
-
-ডেটা browser localStorage-এ থাকে। একাধিক mobile/PC থেকে একই ডেটা ব্যবহার, staff login, cloud backup অথবা automatic reminder দরকার হলে Firebase/Supabase backend যুক্ত করতে হবে।
+`node_modules`, `dist`, `.env`, `.vercel` GitHub-এ push করবেন না; `.gitignore` already configured।

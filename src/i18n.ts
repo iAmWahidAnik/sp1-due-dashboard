@@ -32,6 +32,10 @@ export const copy = {
     dueAmountInfo: 'Outstanding balance is calculated automatically from the ledger.', deleteTransaction: 'Delete transaction',
     deleteTransactionConfirm: 'Delete this transaction? The customer balance will be recalculated.', transactionDeleted: 'Transaction deleted.',
     shareHint: 'Use Print / Save PDF or take a screenshot of this clean statement.', totalDueEntries: 'Total due entries', totalPayments: 'Total payments',
+    cloudNote: 'Data is saved in the cloud and syncs across your signed-in devices.', cloudSynced: 'Cloud synced', syncing: 'Syncing…', syncNow: 'Sync now', lastSynced: 'Last synced', signOut: 'Sign out', retry: 'Retry',
+    customerAdded: 'Customer added.', customerDeleted: 'Customer deleted.', importReplaceConfirm: 'This will replace all cloud customer and transaction data with the selected Excel file. Continue?',
+    loginTitle: 'Admin sign in', loginSubtitle: 'Sign in to access the shared SP1 due ledger from any device.', email: 'Email', password: 'Password', login: 'Sign in', loggingIn: 'Signing in…',
+    setupTitle: 'Cloud setup required', setupText: 'Add the Supabase environment variables in Vercel, then redeploy this site.', setupGuide: 'See SUPABASE_SETUP_BN.md in the project package.', loadingCloud: 'Loading cloud ledger…',
   },
   bn: {
     appName: 'বকেয়া আদায় ড্যাশবোর্ড', company: 'SP1 Global Enterprise', subtitle: 'আজ কাকে আগে তাগাদা দিতে হবে, এক নজরেই বুঝুন।',
@@ -64,6 +68,10 @@ export const copy = {
     dueAmountInfo: 'Ledger-এর due ও payment থেকে বর্তমান বকেয়া স্বয়ংক্রিয়ভাবে হিসাব হয়।', deleteTransaction: 'লেনদেন মুছুন',
     deleteTransactionConfirm: 'এই লেনদেনটি মুছবেন? কাস্টমারের ব্যালেন্স আবার হিসাব হবে।', transactionDeleted: 'লেনদেন মুছে ফেলা হয়েছে।',
     shareHint: 'এই পরিষ্কার স্টেটমেন্টের screenshot নিন অথবা Print / PDF সেভ করুন।', totalDueEntries: 'মোট বকেয়া যোগ', totalPayments: 'মোট payment',
+    cloudNote: 'ডেটা cloud database-এ সেভ হয় এবং login করা সব device-এ sync থাকে।', cloudSynced: 'Cloud synced', syncing: 'Sync হচ্ছে…', syncNow: 'এখন Sync করুন', lastSynced: 'সর্বশেষ Sync', signOut: 'Sign out', retry: 'আবার চেষ্টা করুন',
+    customerAdded: 'কাস্টমার যোগ হয়েছে।', customerDeleted: 'কাস্টমার মুছে ফেলা হয়েছে।', importReplaceConfirm: 'নির্বাচিত Excel file দিয়ে cloud-এর সব customer ও transaction data replace হবে। চালিয়ে যাবেন?',
+    loginTitle: 'Admin Login', loginSubtitle: 'যেকোনো device থেকে একই SP1 due ledger ব্যবহার করতে login করুন।', email: 'Email', password: 'Password', login: 'Login', loggingIn: 'Login হচ্ছে…',
+    setupTitle: 'Cloud setup প্রয়োজন', setupText: 'Vercel-এ Supabase environment variables যোগ করে website redeploy করুন।', setupGuide: 'Project package-এর SUPABASE_SETUP_BN.md দেখুন।', loadingCloud: 'Cloud ledger load হচ্ছে…',
   },
 } as const;
 

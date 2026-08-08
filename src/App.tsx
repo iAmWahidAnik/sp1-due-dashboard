@@ -5,6 +5,7 @@ import {
   BadgeDollarSign,
   CalendarDays,
   CheckCircle2,
+  Cloud,
   ChevronRight,
   CircleDollarSign,
   ClipboardCopy,
@@ -14,13 +15,16 @@ import {
   Eye,
   FileSpreadsheet,
   Languages,
+  LogOut,
   Menu,
   Plus,
   PlusCircle,
   Printer,
   ReceiptText,
+  RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Trash2,
   Upload,
   Users,
@@ -29,7 +33,20 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getCopy } from './i18n';
-import { seedData } from './seedData';
+import {
+  addCloudTransaction,
+  createCustomerWithOpeningDue,
+  deleteCloudCustomer,
+  deleteCloudTransaction,
+  fetchDashboardCustomers,
+  getStoredSession,
+  isCloudConfigured,
+  replaceAllCloudData,
+  signInWithPassword,
+  signOutCloud,
+  updateCustomerAccount,
+  type AuthSession,
+} from './cloud';
 import type {
   CustomerDue,
   Language,
@@ -49,9 +66,6 @@ import {
   normalizeExcelDate,
   urgencyScore,
 } from './utils';
-
-const STORAGE_KEY = 'sp1-due-dashboard-v2';
-const LEGACY_STORAGE_KEY = 'sp1-due-dashboard-v1';
 
 type SortMode = 'urgency' | 'amount' | 'oldest';
 type StatusFilter = 'due' | 'all' | 'paid';
@@ -90,29 +104,14 @@ const emptyTransactionForm = (): TransactionFormState => ({
   note: '',
 });
 
-function cloneSeed(): CustomerDue[] {
-  return seedData.map((customer) => ({
-    ...customer,
-    transactions: customer.transactions.map((transaction) => ({ ...transaction })),
-  }));
-}
-
-function loadInitialData(): CustomerDue[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved) as CustomerDue[];
-      return parsed.map(normalizeCustomer);
-    }
-  } catch {
-    // Fall back to sample data.
-  }
-  return cloneSeed();
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
 function App() {
   const [language, setLanguage] = useState<Language>('en');
-  const [customers, setCustomers] = useState<CustomerDue[]>(loadInitialData);
+  const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
+  const [customers, setCustomers] = useState<CustomerDue[]>([]);
   const [query, setQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('due');
@@ -127,12 +126,47 @@ function App() {
   const [transactionError, setTransactionError] = useState('');
   const [statementCustomerId, setStatementCustomerId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [isLoading, setIsLoading] = useState(Boolean(session));
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [cloudError, setCloudError] = useState('');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const t = getCopy(language);
 
+  async function refreshData(silent = false) {
+    if (!session) return;
+    if (!silent) setIsLoading(true);
+    setIsSyncing(true);
+    try {
+      const nextCustomers = await fetchDashboardCustomers();
+      setCustomers(nextCustomers);
+      setLastSyncedAt(new Date());
+      setCloudError('');
+    } catch (error) {
+      const message = errorMessage(error);
+      setCloudError(message);
+      if (/sign in|expired|jwt|401/i.test(message)) {
+        await signOutCloud().catch(() => undefined);
+        setSession(null);
+        setCustomers([]);
+      }
+    } finally {
+      setIsLoading(false);
+      setIsSyncing(false);
+    }
+  }
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
-  }, [customers]);
+    if (!session || !isCloudConfigured) return;
+    void refreshData();
+    const timer = window.setInterval(() => void refreshData(true), 15_000);
+    const handleFocus = () => void refreshData(true);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [session?.access_token]);
 
   useEffect(() => {
     if (!toast) return;
@@ -249,7 +283,7 @@ function App() {
     setFormError('');
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     const amount = Number(form.dueAmount);
     if (!form.name.trim() || (!editingId && (!form.dueAmount || !form.lastTransactionDate || !form.openingTitle.trim()))) {
@@ -261,49 +295,31 @@ function App() {
       return;
     }
 
-    const timestamp = new Date().toISOString();
-    if (editingId) {
-      setCustomers((current) =>
-        current.map((customer) =>
-          customer.id === editingId
-            ? {
-                ...customer,
-                name: form.name.trim(),
-                phone: form.phone.trim(),
-                note: form.note.trim(),
-                updatedAt: timestamp,
-              }
-            : customer,
-        ),
-      );
-      setToast(t.accountUpdated);
-    } else {
-      const transaction: LedgerTransaction = {
-        id: crypto.randomUUID(),
-        type: 'due',
-        title: form.openingTitle.trim(),
-        amount,
-        date: form.lastTransactionDate,
-        note: form.note.trim(),
-        createdAt: timestamp,
-      };
-      setCustomers((current) => [
-        {
-          id: crypto.randomUUID(),
+    setFormError('');
+    try {
+      if (editingId) {
+        await updateCustomerAccount(editingId, {
           name: form.name.trim(),
-          dueAmount: amount,
-          lastTransactionDate: form.lastTransactionDate,
           phone: form.phone.trim(),
           note: form.note.trim(),
-          status: 'due',
-          transactions: [transaction],
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        },
-        ...current,
-      ]);
+        });
+        setToast(t.accountUpdated);
+      } else {
+        await createCustomerWithOpeningDue({
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          note: form.note.trim(),
+          title: form.openingTitle.trim(),
+          amount,
+          date: form.lastTransactionDate,
+        });
+        setToast(t.customerAdded);
+      }
+      await refreshData(true);
+      closeForm();
+    } catch (error) {
+      setFormError(errorMessage(error));
     }
-    closeForm();
   }
 
   function openTransaction(customer: CustomerDue, type: TransactionType) {
@@ -324,7 +340,7 @@ function App() {
     setTransactionError('');
   }
 
-  function handleTransactionSubmit(event: React.FormEvent) {
+  async function handleTransactionSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!transactionCustomer) return;
     const amount = Number(transactionForm.amount);
@@ -341,141 +357,206 @@ function App() {
       return;
     }
 
-    const timestamp = new Date().toISOString();
-    const transaction: LedgerTransaction = {
-      id: crypto.randomUUID(),
-      type: transactionType,
-      title: transactionForm.title.trim(),
-      amount,
-      date: transactionForm.date,
-      note: transactionForm.note.trim(),
-      createdAt: timestamp,
-    };
-
-    setCustomers((current) =>
-      current.map((customer) => {
-        if (customer.id !== transactionCustomer.id) return customer;
-        const transactions = [...customer.transactions, transaction];
-        const dueAmount = calculateBalance(transactions);
-        return {
-          ...customer,
-          transactions,
-          dueAmount,
-          status: dueAmount > 0 ? 'due' : 'paid',
-          lastTransactionDate: latestTransactionDate(transactions, customer.lastTransactionDate),
-          updatedAt: timestamp,
-        };
-      }),
-    );
-    setToast(transactionType === 'due' ? t.dueAdded : t.paymentAdded);
-    closeTransaction();
+    setTransactionError('');
+    try {
+      await addCloudTransaction(transactionCustomer.id, {
+        type: transactionType,
+        title: transactionForm.title.trim(),
+        amount,
+        date: transactionForm.date,
+        note: transactionForm.note.trim(),
+      });
+      await refreshData(true);
+      setToast(transactionType === 'due' ? t.dueAdded : t.paymentAdded);
+      closeTransaction();
+    } catch (error) {
+      setTransactionError(errorMessage(error));
+    }
   }
 
-  function deleteTransaction(customerId: string, transactionId: string) {
+  async function deleteTransaction(customerId: string, transactionId: string) {
     if (!window.confirm(t.deleteTransactionConfirm)) return;
-    setCustomers((current) =>
-      current.map((customer) => {
-        if (customer.id !== customerId) return customer;
-        const transactions = customer.transactions.filter((transaction) => transaction.id !== transactionId);
-        const dueAmount = calculateBalance(transactions);
-        return {
-          ...customer,
-          transactions,
-          dueAmount,
-          status: dueAmount > 0 ? 'due' : 'paid',
-          lastTransactionDate: latestTransactionDate(transactions, customer.createdAt.slice(0, 10)),
-          updatedAt: new Date().toISOString(),
-        };
-      }),
-    );
-    setToast(t.transactionDeleted);
+    try {
+      await deleteCloudTransaction(transactionId);
+      await refreshData(true);
+      setToast(t.transactionDeleted);
+      if (statementCustomerId === customerId) setStatementCustomerId(customerId);
+    } catch (error) {
+      window.alert(errorMessage(error));
+    }
   }
 
-  function deleteCustomer(customer: CustomerDue) {
+  async function deleteCustomer(customer: CustomerDue) {
     if (!window.confirm(t.deleteConfirm)) return;
-    setCustomers((current) => current.filter((item) => item.id !== customer.id));
-    if (statementCustomerId === customer.id) setStatementCustomerId(null);
+    try {
+      await deleteCloudCustomer(customer.id);
+      await refreshData(true);
+      if (statementCustomerId === customer.id) setStatementCustomerId(null);
+      setToast(t.customerDeleted);
+    } catch (error) {
+      window.alert(errorMessage(error));
+    }
   }
 
   function resetData() {
-    if (!window.confirm(t.resetConfirm)) return;
-    setCustomers(cloneSeed());
-    setQuery('');
-    setPriorityFilter('all');
-    setStatusFilter('due');
+    void refreshData();
   }
 
   async function importExcel(file: File) {
     try {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-      const sheetResults: CustomerDue[][] = [];
+      let imported: CustomerDue[] = [];
 
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
-        const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-          header: 1,
-          defval: null,
-          raw: true,
-        });
+      const transactionSheet = workbook.Sheets.Transactions;
+      if (transactionSheet) {
+        const customerSheet = workbook.Sheets.Customers;
+        const customerRows = customerSheet
+          ? XLSX.utils.sheet_to_json<Record<string, unknown>>(customerSheet, { defval: '' })
+          : [];
+        const transactionRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(transactionSheet, { defval: '' });
 
-        const headerRowIndex = matrix.findIndex((row) => {
-          const labels = row.map((value) => String(value ?? '').trim().toLowerCase());
-          return labels.some((label) => /^(name|customer|কাস্টমার|নাম)$/.test(label)) &&
-            labels.some((label) => /^(amount|due amount|বকেয়া|টাকা)$/.test(label));
-        });
-
-        if (headerRowIndex < 0) continue;
-        const headers = matrix[headerRowIndex].map((value) => String(value ?? '').trim());
-        const findIndex = (patterns: RegExp[]) =>
-          headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)));
-        const nameIndex = findIndex([/^name$/i, /customer/i, /কাস্টমার/i, /^নাম$/i]);
-        const amountIndex = findIndex([/^amount$/i, /due amount/i, /বকেয়া/i, /^টাকা$/i]);
-        const dateIndex = findIndex([/last.*transaction/i, /update.*date/i, /^date$/i, /তারিখ/i]);
-        if (nameIndex < 0 || amountIndex < 0 || dateIndex < 0) continue;
-
-        const parsed: CustomerDue[] = [];
-        for (const row of matrix.slice(headerRowIndex + 1)) {
-          const name = row[nameIndex];
-          const amount = row[amountIndex];
-          const date = row[dateIndex];
-          const normalizedDate = normalizeExcelDate(date);
-          const numericAmount = typeof amount === 'number' ? amount : Number(amount);
-          if (!name || !normalizedDate || !Number.isFinite(numericAmount) || numericAmount <= 0) continue;
-          const normalizedName = String(name).trim();
-          if (/total/i.test(normalizedName)) continue;
-          const timestamp = new Date().toISOString();
-          parsed.push({
-            id: crypto.randomUUID(),
-            name: normalizedName,
-            dueAmount: numericAmount,
-            lastTransactionDate: normalizedDate,
-            status: 'due',
-            transactions: [{
-              id: crypto.randomUUID(),
-              type: 'due',
-              title: t.openingDue,
-              amount: numericAmount,
-              date: normalizedDate,
-              note: 'Imported from Excel',
-              createdAt: timestamp,
-            }],
-            createdAt: timestamp,
-            updatedAt: timestamp,
+        const customerMeta = new Map<string, { phone: string; note: string }>();
+        for (const row of customerRows) {
+          const name = String(row.Name ?? row.Customer ?? '').trim();
+          if (!name) continue;
+          customerMeta.set(name, {
+            phone: String(row.Phone ?? '').trim(),
+            note: String(row.Note ?? '').trim(),
           });
         }
-        if (parsed.length) sheetResults.push(parsed);
+
+        const map = new Map<string, CustomerDue>();
+        const ensureCustomer = (name: string) => {
+          let customer = map.get(name);
+          if (customer) return customer;
+          const meta = customerMeta.get(name);
+          const timestamp = new Date().toISOString();
+          customer = {
+            id: crypto.randomUUID(),
+            name,
+            phone: meta?.phone ?? '',
+            note: meta?.note ?? '',
+            dueAmount: 0,
+            lastTransactionDate: todayIso(),
+            status: 'paid',
+            transactions: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          };
+          map.set(name, customer);
+          return customer;
+        };
+
+        for (const name of customerMeta.keys()) ensureCustomer(name);
+
+        transactionRows.forEach((row, index) => {
+          const name = String(row.Customer ?? row.Name ?? '').trim();
+          const date = normalizeExcelDate(row.Date ?? row['Transaction Date']);
+          const amount = Number(row.Amount ?? row['Due Amount']);
+          if (!name || !date || !Number.isFinite(amount) || amount <= 0) return;
+
+          const typeRaw = String(row.Type ?? 'Due').trim().toLowerCase();
+          const type: TransactionType = typeRaw.includes('payment') || typeRaw.includes('paid') ? 'payment' : 'due';
+          const customer = ensureCustomer(name);
+          const title = String(row.Title ?? row.Product ?? row['Product Name'] ?? (type === 'payment' ? t.paymentReceived : t.openingDue)).trim();
+          const note = String(row.Note ?? '').trim();
+          customer.transactions.push({
+            id: crypto.randomUUID(),
+            type,
+            title: title || (type === 'payment' ? t.paymentReceived : t.openingDue),
+            amount,
+            date,
+            note,
+            createdAt: `${date}T${String(Math.floor(index / 3600)).padStart(2, '0')}:${String(Math.floor(index / 60) % 60).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
+          });
+        });
+
+        imported = Array.from(map.values()).map((customer) => {
+          const dueAmount = calculateBalance(customer.transactions);
+          const fallback = customer.createdAt.slice(0, 10);
+          const lastTransactionDate = latestTransactionDate(customer.transactions, fallback);
+          const firstDate = [...customer.transactions].sort((a, b) => a.date.localeCompare(b.date))[0]?.date;
+          return {
+            ...customer,
+            dueAmount,
+            status: dueAmount > 0 ? 'due' : 'paid',
+            lastTransactionDate,
+            createdAt: firstDate ? `${firstDate}T00:00:00.000Z` : customer.createdAt,
+            updatedAt: new Date().toISOString(),
+          };
+        });
       }
 
-      const imported = sheetResults.sort((a, b) => b.length - a.length)[0] ?? [];
+      if (!imported.length) {
+        const sheetResults: CustomerDue[][] = [];
+
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+            header: 1,
+            defval: null,
+            raw: true,
+          });
+
+          const headerRowIndex = matrix.findIndex((row) => {
+            const labels = row.map((value) => String(value ?? '').trim().toLowerCase());
+            return labels.some((label) => /^(name|customer|কাস্টমার|নাম)$/.test(label)) &&
+              labels.some((label) => /^(amount|due amount|current outstanding|বকেয়া|টাকা)$/.test(label));
+          });
+
+          if (headerRowIndex < 0) continue;
+          const headers = matrix[headerRowIndex].map((value) => String(value ?? '').trim());
+          const findIndex = (patterns: RegExp[]) =>
+            headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)));
+          const nameIndex = findIndex([/^name$/i, /customer/i, /কাস্টমার/i, /^নাম$/i]);
+          const amountIndex = findIndex([/^amount$/i, /due amount/i, /current outstanding/i, /বকেয়া/i, /^টাকা$/i]);
+          const dateIndex = findIndex([/last.*transaction/i, /update.*date/i, /^date$/i, /তারিখ/i]);
+          if (nameIndex < 0 || amountIndex < 0 || dateIndex < 0) continue;
+
+          const parsed: CustomerDue[] = [];
+          for (const row of matrix.slice(headerRowIndex + 1)) {
+            const name = row[nameIndex];
+            const amount = row[amountIndex];
+            const date = row[dateIndex];
+            const normalizedDate = normalizeExcelDate(date);
+            const numericAmount = typeof amount === 'number' ? amount : Number(amount);
+            if (!name || !normalizedDate || !Number.isFinite(numericAmount) || numericAmount <= 0) continue;
+            const normalizedName = String(name).trim();
+            if (/total/i.test(normalizedName)) continue;
+            const timestamp = new Date().toISOString();
+            parsed.push(normalizeCustomer({
+              id: crypto.randomUUID(),
+              name: normalizedName,
+              dueAmount: numericAmount,
+              lastTransactionDate: normalizedDate,
+              status: 'due',
+              transactions: [{
+                id: crypto.randomUUID(),
+                type: 'due',
+                title: t.openingDue,
+                amount: numericAmount,
+                date: normalizedDate,
+                note: 'Imported from Excel',
+                createdAt: timestamp,
+              }],
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            }));
+          }
+          if (parsed.length) sheetResults.push(parsed);
+        }
+        imported = sheetResults.sort((a, b) => b.length - a.length)[0] ?? [];
+      }
+
       if (!imported.length) throw new Error('No rows');
-      const deduped = Array.from(
-        new Map(imported.map((item) => [`${item.name}-${item.lastTransactionDate}`, item])).values(),
-      );
-      setCustomers(deduped);
-      setToast(`${formatNumber(deduped.length, language)} ${t.imported}`);
-    } catch {
-      window.alert(t.importError);
+      if (!window.confirm(t.importReplaceConfirm)) return;
+
+      await replaceAllCloudData(imported);
+      await refreshData(true);
+      setToast(`${formatNumber(imported.length, language)} ${t.imported}`);
+    } catch (error) {
+      window.alert(`${t.importError}\n\n${errorMessage(error)}`);
     } finally {
       if (fileRef.current) fileRef.current.value = '';
     }
@@ -513,6 +594,31 @@ function App() {
     XLSX.writeFile(workbook, `SP1-Due-Ledger-${todayIso()}.xlsx`);
   }
 
+  async function handleLogin(email: string, password: string) {
+    const nextSession = await signInWithPassword(email, password);
+    setIsLoading(true);
+    try {
+      const nextCustomers = await fetchDashboardCustomers();
+      setCustomers(nextCustomers);
+      setLastSyncedAt(new Date());
+      setCloudError('');
+      setSession(nextSession);
+    } catch (error) {
+      await signOutCloud().catch(() => undefined);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    await signOutCloud().catch(() => undefined);
+    setSession(null);
+    setCustomers([]);
+    setStatementCustomerId(null);
+    setCloudError('');
+  }
+
   async function copyStatement(customer: CustomerDue) {
     const rows = buildLedgerRows(customer.transactions);
     const lines = [
@@ -533,6 +639,18 @@ function App() {
     }
   }
 
+  if (!isCloudConfigured) {
+    return <SetupRequired language={language} onToggleLanguage={() => setLanguage((current) => (current === 'en' ? 'bn' : 'en'))} />;
+  }
+
+  if (!session) {
+    return <LoginScreen language={language} onToggleLanguage={() => setLanguage((current) => (current === 'en' ? 'bn' : 'en'))} onLogin={handleLogin} />;
+  }
+
+  if (isLoading && !customers.length) {
+    return <LoadingScreen language={language} />;
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -544,6 +662,13 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
+          <div className={`sync-chip ${isSyncing ? 'syncing' : ''}`} title={lastSyncedAt ? `${t.lastSynced}: ${lastSyncedAt.toLocaleTimeString()}` : t.cloudSynced}>
+            <Cloud size={15} />
+            <span>{isSyncing ? t.syncing : t.cloudSynced}</span>
+          </div>
+          <button className="icon-button header-icon" onClick={() => void refreshData()} title={t.syncNow} aria-label={t.syncNow}>
+            <RefreshCw size={17} className={isSyncing ? 'spin' : ''} />
+          </button>
           <button
             className="language-toggle"
             onClick={() => setLanguage((current) => (current === 'en' ? 'bn' : 'en'))}
@@ -555,6 +680,9 @@ function App() {
           <button className="primary-button" onClick={openCreateForm}>
             <Plus size={18} />
             <span>{t.addCustomer}</span>
+          </button>
+          <button className="icon-button header-icon" onClick={() => void handleLogout()} title={t.signOut} aria-label={t.signOut}>
+            <LogOut size={17} />
           </button>
         </div>
       </header>
@@ -584,6 +712,8 @@ function App() {
             </button>
           </div>
         </section>
+
+        {cloudError && <div className="cloud-error"><AlertTriangle size={17} /><span>{cloudError}</span><button onClick={() => void refreshData()}>{t.retry}</button></div>}
 
         <section className="stats-grid">
           <StatCard label={t.totalDue} value={formatMoney(totalDue, language)} icon={<CircleDollarSign size={22} />} detail={`${formatNumber(activeCustomers.length, language)} ${t.customerCount}`} tone="green" />
@@ -631,7 +761,7 @@ function App() {
                 );
               })}
             </div>
-            <div className="browser-note"><CheckCircle2 size={17} /><span>{t.localNote}</span></div>
+            <div className="browser-note"><Cloud size={17} /><span>{t.cloudNote}</span></div>
           </div>
         </section>
 
@@ -684,7 +814,7 @@ function App() {
             </table>
             {!filteredCustomers.length && <div className="empty-state"><FileSpreadsheet size={34} /><strong>{t.noData}</strong></div>}
           </div>
-          <div className="table-footer"><button className="text-button danger-text" onClick={resetData}><RotateCcw size={15} /> {t.resetData}</button></div>
+          <div className="table-footer"><button className="text-button" onClick={resetData}><RotateCcw size={15} className={isSyncing ? "spin" : ""} /> {t.syncNow}</button></div>
         </section>
       </main>
 
@@ -749,6 +879,106 @@ function App() {
       )}
 
       {toast && <div className="toast"><CheckCircle2 size={18} /> {toast}</div>}
+    </div>
+  );
+}
+
+
+function SetupRequired({
+  language,
+  onToggleLanguage,
+}: {
+  language: Language;
+  onToggleLanguage: () => void;
+}) {
+  const t = getCopy(language);
+  return (
+    <div className="auth-shell">
+      <div className="auth-card setup-card">
+        <div className="auth-topline">
+          <div className="brand">
+            <div className="brand-mark">SP1</div>
+            <div><div className="company-name">{t.company}</div><div className="app-name">{t.appName}</div></div>
+          </div>
+          <button className="language-toggle" onClick={onToggleLanguage}><Languages size={17} /><span>{language === 'en' ? 'বাংলা' : 'English'}</span></button>
+        </div>
+        <div className="auth-icon"><Cloud size={28} /></div>
+        <h1>{t.setupTitle}</h1>
+        <p>{t.setupText}</p>
+        <div className="env-box">
+          <code>VITE_SUPABASE_URL</code>
+          <code>VITE_SUPABASE_ANON_KEY</code>
+        </div>
+        <small>{t.setupGuide}</small>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({
+  language,
+  onToggleLanguage,
+  onLogin,
+}: {
+  language: Language;
+  onToggleLanguage: () => void;
+  onLogin: (email: string, password: string) => Promise<void>;
+}) {
+  const t = getCopy(language);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!email.trim() || !password) {
+      setLoginError(t.required);
+      return;
+    }
+    setLoggingIn(true);
+    setLoginError('');
+    try {
+      await onLogin(email.trim(), password);
+    } catch (error) {
+      setLoginError(errorMessage(error));
+    } finally {
+      setLoggingIn(false);
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-topline">
+          <div className="brand">
+            <div className="brand-mark">SP1</div>
+            <div><div className="company-name">{t.company}</div><div className="app-name">{t.appName}</div></div>
+          </div>
+          <button className="language-toggle" onClick={onToggleLanguage}><Languages size={17} /><span>{language === 'en' ? 'বাংলা' : 'English'}</span></button>
+        </div>
+        <div className="auth-icon"><ShieldCheck size={28} /></div>
+        <h1>{t.loginTitle}</h1>
+        <p>{t.loginSubtitle}</p>
+        <form onSubmit={submit}>
+          <label className="form-field"><span>{t.email}</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" /></label>
+          <label className="form-field"><span>{t.password}</span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" /></label>
+          {loginError && <div className="form-error">{loginError}</div>}
+          <button className="primary-button auth-submit" type="submit" disabled={loggingIn}>{loggingIn ? t.loggingIn : t.login}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen({ language }: { language: Language }) {
+  const t = getCopy(language);
+  return (
+    <div className="auth-shell">
+      <div className="loading-card">
+        <RefreshCw size={24} className="spin" />
+        <strong>{t.loadingCloud}</strong>
+      </div>
     </div>
   );
 }

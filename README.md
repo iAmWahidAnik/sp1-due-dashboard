@@ -1,47 +1,45 @@
-# SP1 Due Collection Dashboard — Ledger Edition
+# SP1 Global Due Dashboard — Cloud Edition
 
-A light-theme bilingual React dashboard for tracking customer dues, payments and follow-up priorities.
+React + TypeScript + Vite due/payment ledger for SP1 Global Enterprise.
 
-## Main features
+## What changed in Cloud Edition
 
-- English / বাংলা language toggle
-- Customer-wise transaction ledger
-- Add a new due with product/title, amount, date and note
-- Add a partial or full payment with title, amount, date and note
-- Outstanding balance recalculates automatically
-- Clean customer statement with running balance
-- Copy statement text, print it or save it as PDF
-- Delete an incorrect transaction and recalculate the account
-- View outstanding, paid or all customer accounts
-- Follow-up priority based on transaction age and outstanding balance
-- Search, status/priority filters and sorting
-- Excel import and two-sheet Excel export (Customers + Transactions)
-- Browser localStorage persistence
-- Responsive desktop/mobile layout
-- Initial data imported from `Sp1 - Due List (13 July, 2026).xlsx`
+- Supabase cloud database instead of browser-only localStorage
+- Admin email/password login
+- Same ledger across phone/PC/tablet
+- Auto sync every 15 seconds + refresh on window focus
+- Customer-wise due/payment transaction history
+- Running statement suitable for screenshot/print/PDF
+- New due with product/title + amount + date
+- Payment with title + amount + date
+- Excel backup export/import
+- Bengali/English toggle
+- Updated left-aligned customer UI
+- Favicon included
+- Vercel TypeScript `TS5096` fix included
 
-## Run locally
+## Initial data
+
+`sample-data/SP1-Due-Ledger-2026-08-08.xlsx`
+
+- 25 customers
+- 37 ledger transactions
+- ৳128,650 current outstanding
+
+## Setup
+
+Read `SUPABASE_SETUP_BN.md` and run `supabase/setup.sql` in a new Supabase project before deploying.
+
+Local development:
 
 ```bash
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Open the URL shown by Vite, normally `http://localhost:5173`.
-
-## Quick standalone demo
-
-Open `standalone/index.html` directly in a browser, or run `start-demo.bat` on Windows.
-
-## Production build
+Production build:
 
 ```bash
 npm run build
-npm run preview
 ```
-
-The production files will be created in the `dist` folder.
-
-## Data storage
-
-This version stores data in the current browser. For shared multi-device access, user accounts, cloud backup, WhatsApp/SMS reminders or multiple staff logins, connect it to Firebase, Supabase or another backend.
